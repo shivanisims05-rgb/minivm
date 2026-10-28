@@ -1,0 +1,4 @@
+mbc
+*.o
+*.mbc
+__pycache__/

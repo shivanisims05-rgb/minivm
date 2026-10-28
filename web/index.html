@@ -1,0 +1,756 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mbc live demo</title>
+<style>
+  :root {
+    --ink:#111827; --green:#15803d; --lime:#4ade80; --dark:#0b0f14; --line:#d1d5db; --bg:#f3f4f6; --mute:#4b5563;
+    --c-stack:#1d4ed8; --c-arith:#15803d; --c-cmp:#7e22ce; --c-ctl:#c2410c; --c-io:#be123c;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:Calibri, Arial, sans-serif; color:var(--ink); background:var(--bg); font-size:16px; }
+  .mono, pre, textarea { font-family:"Courier New", monospace; }
+  header { background:var(--dark); color:#fff; padding:10px 18px; display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; }
+  header h1 { font-size:18px; margin:0; }
+  header span { color:var(--lime); font-size:13px; }
+  header small { margin-left:auto; color:#9ca3af; font-size:12px; }
+
+  .bar { display:flex; gap:10px; align-items:center; padding:8px 18px; background:#fff; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  select, button { font:inherit; padding:5px 10px; border:1px solid var(--line); background:#fff; border-radius:3px; cursor:pointer; }
+  button:disabled { opacity:.4; cursor:default; }
+  button.run { background:var(--green); color:#fff; border-color:var(--green); font-weight:700; padding:5px 18px; }
+
+  /* pipeline strip */
+  .pipe { display:flex; align-items:stretch; gap:0; padding:12px 18px 4px; overflow-x:auto; }
+  .stage { flex:1 1 0; min-width:120px; border:2px solid var(--line); background:#fff; padding:8px 10px; text-align:center; cursor:pointer; position:relative; }
+  .stage b { display:block; font-size:15px; }
+  .stage i { display:block; font-style:normal; font-size:12px; color:var(--mute); margin-top:2px; }
+  .stage.done { background:#dcfce7; border-color:#86efac; }
+  .stage.on { background:var(--green); border-color:var(--green); color:#fff; }
+  .stage.on i { color:#dcfce7; }
+  .stage.bad { background:#fee2e2; border-color:#dc2626; color:#7f1d1d; }
+  .stage.bad i { color:#991b1b; }
+  .stage.on.bad { background:#dc2626; color:#fff; }
+  .stage.on.bad i { color:#fee2e2; }
+  .arrow { align-self:center; padding:0 4px; color:var(--mute); font-size:20px; }
+
+  .explain { margin:8px 18px 0; background:#fff; border:1px solid var(--line); border-left:5px solid var(--green); padding:10px 14px; display:grid; grid-template-columns:1fr auto; gap:6px 16px; }
+  .explain h3 { margin:0 0 4px; font-size:17px; }
+  .explain p { margin:3px 0; line-height:1.4; }
+  .explain .look { color:#14532d; }
+  .explain .nav { display:flex; flex-direction:column; gap:6px; justify-content:center; }
+
+  main { display:grid; grid-template-columns:minmax(0,.8fr) minmax(0,1.4fr); gap:14px; padding:12px 18px 24px; }
+  @media (max-width:950px) { main { grid-template-columns:1fr; } .explain { grid-template-columns:1fr; } }
+  .panel { background:#fff; border:1px solid var(--line); border-radius:3px; min-width:0; }
+  .panel h2 { font-size:12px; text-transform:uppercase; letter-spacing:.06em; margin:0; padding:8px 12px; border-bottom:1px solid var(--line); color:var(--mute); }
+  textarea { width:100%; height:560px; border:0; padding:10px 12px; resize:vertical; outline:none; font-size:14px; line-height:1.45; tab-size:4; }
+  pre { margin:0; padding:10px 12px; overflow:auto; max-height:600px; font-size:14px; line-height:1.45; }
+  .note { padding:8px 12px; font-size:14px; color:var(--mute); border-top:1px solid var(--line); }
+  .err { background:#fef2f2; color:#991b1b; border-left:4px solid #dc2626; padding:10px 12px; font-family:"Courier New",monospace; font-size:14px; white-space:pre-wrap; margin:10px; }
+  .good { color:var(--green); font-weight:700; }
+  .bad-t { color:#991b1b; font-weight:700; }
+
+  /* tokens */
+  .tokline { display:flex; gap:6px; padding:5px 12px; align-items:center; flex-wrap:wrap; border-bottom:1px solid #eef0f2; }
+  .tokline .ln { width:34px; color:#9ca3af; font-size:12px; text-align:right; margin-right:4px; }
+  .chip { font-family:"Courier New",monospace; font-size:14px; padding:2px 8px; border-radius:3px; border:1px solid; }
+  .t-KEYWORD { background:#dcfce7; border-color:#86efac; color:#14532d; }
+  .t-IDENT { background:#dbeafe; border-color:#93c5fd; color:#1e3a8a; }
+  .t-NUMBER { background:#ffedd5; border-color:#fdba74; color:#7c2d12; }
+  .t-OPERATOR { background:#f3e8ff; border-color:#d8b4fe; color:#581c87; }
+  .t-DELIM { background:#f3f4f6; border-color:#d1d5db; color:#374151; }
+  .legend { display:flex; gap:8px; padding:8px 12px; flex-wrap:wrap; border-top:1px solid var(--line); font-size:13px; align-items:center; }
+
+  /* tree */
+  .tree, .tree ul { list-style:none; margin:0; padding-left:22px; }
+  .tree { padding:10px 14px; max-height:600px; overflow:auto; }
+  .tree li { position:relative; padding:3px 0 3px 0; }
+  .tree ul { border-left:2px solid #d1d5db; margin-left:8px; }
+  .pill { display:inline-block; font-size:14px; padding:2px 9px; border-radius:12px; border:1px solid; background:#fff; }
+  .pill small { color:var(--mute); font-size:12px; margin-left:6px; font-family:"Courier New",monospace; }
+  .n-Function { background:#0b0f14; color:#4ade80; border-color:#0b0f14; }
+  .n-Block { background:#f3f4f6; border-color:#d1d5db; }
+  .n-Bin, .n-Neg { background:#f3e8ff; border-color:#d8b4fe; }
+  .n-Num { background:#ffedd5; border-color:#fdba74; }
+  .n-Var, .n-Decl, .n-Assign { background:#dbeafe; border-color:#93c5fd; }
+  .n-If, .n-While, .n-Return { background:#ffedd5; border-color:#fb923c; }
+  .n-Print, .n-Call { background:#dcfce7; border-color:#86efac; }
+
+  /* bytecode */
+  .bc div { display:flex; gap:10px; padding:0 8px; white-space:pre; }
+  .bc .fn { margin-top:8px; font-weight:700; background:#0b0f14; color:#4ade80; padding:2px 8px; }
+  .bc .addr { color:#9ca3af; width:38px; }
+  .bc .op { width:56px; font-weight:700; }
+  .bc .arg { width:38px; }
+  .bc .why { color:#6b7280; font-family:Calibri,Arial,sans-serif; font-size:13.5px; white-space:normal; }
+  .bc div.cur { background:#bbf7d0; }
+  .o-stack { color:var(--c-stack); } .o-arith { color:var(--c-arith); } .o-cmp { color:var(--c-cmp); } .o-ctl { color:var(--c-ctl); } .o-io { color:var(--c-io); }
+  .seg { display:flex; gap:0; padding:8px 12px; border-bottom:1px solid var(--line); align-items:center; flex-wrap:wrap; }
+  .seg button { border-radius:0; } .seg button.on { background:var(--green); color:#fff; border-color:var(--green); }
+  .seg span { margin-left:12px; font-size:14px; color:var(--mute); }
+  details { border-top:1px solid var(--line); padding:6px 12px; font-size:14px; }
+  summary { cursor:pointer; font-weight:700; }
+  table { border-collapse:collapse; width:100%; margin-top:6px; font-size:14px; }
+  td, th { border-bottom:1px solid #e5e7eb; padding:3px 6px; text-align:left; vertical-align:top; }
+
+  /* vm */
+  .ctrl { display:flex; gap:8px; padding:8px 12px; align-items:center; flex-wrap:wrap; border-bottom:1px solid var(--line); }
+  .ctrl input[type=range] { flex:1; min-width:120px; }
+  .now { padding:10px 14px; border-bottom:1px solid var(--line); background:#f0fdf4; }
+  .now .ins { font-family:"Courier New",monospace; font-size:20px; font-weight:700; }
+  .now .says { font-size:17px; margin-top:4px; line-height:1.35; }
+  .vmgrid { display:grid; grid-template-columns:1fr 1fr; }
+  .vmgrid > div { padding:8px 12px; min-width:0; }
+  .vmgrid > div + div { border-left:1px solid var(--line); }
+  .vmgrid h4 { margin:0 0 6px; font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:var(--mute); }
+  .stackbox { display:flex; flex-direction:column-reverse; gap:4px; min-height:60px; border-bottom:3px solid #374151; border-left:3px solid #374151; border-right:3px solid #374151; padding:6px; max-height:220px; overflow:auto; background:#f9fafb; }
+  .cell { background:var(--dark); color:var(--lime); font-family:"Courier New",monospace; padding:4px 10px; text-align:center; border-radius:2px; }
+  .cell.top { outline:3px solid var(--green); }
+  .empty { color:#9ca3af; font-size:13px; align-self:center; }
+  .frame { border:2px solid var(--line); padding:5px 8px; margin-bottom:6px; background:#fff; }
+  .frame.top { border-color:var(--green); background:#f0fdf4; }
+  .frame b { font-family:"Courier New",monospace; }
+  .vars { display:flex; gap:6px; flex-wrap:wrap; margin-top:4px; }
+  .var { font-family:"Courier New",monospace; font-size:13px; background:#dbeafe; padding:1px 7px; border-radius:3px; }
+  .pcline { padding:6px 14px; font-size:14px; border-top:1px solid var(--line); }
+  .bcwrap { border-top:1px solid var(--line); }
+  .bcwrap pre { max-height:230px; padding:6px 0; position:relative; }
+  .outline { margin-top:8px; padding-top:6px; border-top:1px dashed #86efac; } .outline .mono { font-weight:700; font-size:17px; }
+
+  .cards { display:flex; gap:10px; padding:10px 12px; flex-wrap:wrap; }
+  .card { border:1px solid var(--line); padding:8px 14px; min-width:140px; }
+  .card b { display:block; font-size:24px; font-family:"Courier New",monospace; }
+  .card span { font-size:13px; color:var(--mute); }
+  .twocol { display:grid; grid-template-columns:1fr 1fr; }
+  .twocol > div + div { border-left:1px solid var(--line); }
+  .twocol h3 { font-size:12px; margin:0; padding:6px 12px; background:var(--bg); text-transform:uppercase; letter-spacing:.05em; }
+  .diff div { display:flex; gap:10px; padding:0 8px; white-space:pre; }
+  .diff .del { background:#fee2e2; } .diff .add { background:#dcfce7; } .diff .blank { opacity:.4; }
+  .hexrow { display:flex; gap:14px; font-family:"Courier New",monospace; font-size:13px; padding:0 12px; white-space:pre; }
+  .hexrow .off { color:#9ca3af; } .hexrow .asc { color:var(--mute); }
+  .hx { padding:0 1px; } .f-magic { background:#16a34a; color:#fff; } .f-len { background:#fde047; } .f-code { background:#dbeafe; } .f-nf { background:#bbf7d0; } .f-fn { background:#f3e8ff; }
+  .btns { display:flex; gap:8px; flex-wrap:wrap; padding:10px 12px; border-top:1px solid var(--line); }
+  .okbox { background:#f0fdf4; border-left:4px solid var(--green); padding:8px 12px; margin:10px; }
+  .tick { display:inline-block; width:18px; height:18px; line-height:18px; border-radius:50%; text-align:center; color:#fff; font-size:12px; margin-right:6px; } .tick.y { background:var(--green); } .tick.n { background:#dc2626; }
+  .trow { padding:1px 12px; font-size:14px; } .tsec { padding:3px 12px; background:var(--bg); font-weight:700; font-size:13px; }
+  .meter { height:22px; border:1px solid var(--line); margin:6px 12px; position:relative; } .meter i { position:absolute; inset:0 auto 0 0; background:var(--green); } .meter span { position:relative; padding-left:8px; color:#fff; font-size:13px; font-family:"Courier New",monospace; }
+  .barrow { display:flex; align-items:center; gap:10px; padding:4px 12px; } .barrow span:first-child { width:190px; } .barrow i { display:block; height:16px; } .barrow .mono { width:90px; }
+  .opt { display:flex; align-items:center; gap:5px; font-size:15px; }
+  #dis div[data-pc] { cursor:pointer; } #dis div[data-pc]:hover { background:#f3f4f6; }
+  #dis div.bp { background:#fee2e2; box-shadow:inset 5px 0 0 #dc2626; } #dis div.cur.bp { background:#bbf7d0; box-shadow:inset 5px 0 0 #dc2626; }
+  .chart { padding:6px 12px 8px; border-top:1px solid var(--line); } .chart svg { width:100%; height:78px; display:block; background:#f9fafb; border:1px solid var(--line); cursor:crosshair; }
+  .chart .lg { font-size:12px; color:var(--mute); } .chart .lg b { display:inline-block; width:12px; height:3px; margin:0 4px 2px 10px; vertical-align:middle; }
+  kbd { background:#e5e7eb; border:1px solid #9ca3af; border-radius:3px; padding:0 5px; font-size:12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Virtual Machine + Bytecode Compiler</h1><span class="mono">mbc live demo</span>
+  <small>Complete version. Right / Left arrow keys step the VM</small>
+</header>
+
+<div class="bar">
+  <label>Example: <select id="ex"></select></label>
+  <label class="opt"><input type="checkbox" id="opt"> Constant folding (-O)</label>
+  <button class="run" id="run">Compile &amp; Run</button>
+  <span id="status" class="mono" style="font-size:13px;color:var(--mute)"></span>
+</div>
+
+<div class="pipe" id="pipe"></div>
+
+<div class="explain" id="explain"></div>
+
+<main>
+  <section class="panel">
+    <h2>Source program (MiniC)</h2>
+    <textarea id="src" spellcheck="false"></textarea>
+  </section>
+  <section class="panel" id="view"></section>
+</main>
+
+<script>
+/* ---------- static text ---------- */
+const STAGES = [
+  { k:"source",  name:"Source",            sub:"MiniC text",
+    what:"The compiler reads a program written in MiniC, a small C-like language: one type (int), functions, if / else, while, print and recursion. This text is the input to the whole pipeline.",
+    look:"Edit the program on the left or pick another example. Press Compile & Run and every stage on the right updates. Then press Next phase." },
+  { k:"lexer",   name:"Lexer",             sub:"text to tokens",
+    what:"The lexer (hand-written scanner) reads the characters one by one and groups them into tokens: keywords, identifiers, numbers, operators and punctuation. Spaces and comments are thrown away. It also records the line number of every token for error messages.",
+    look:"Each coloured chip is one token. Notice that 2 + 3 * 4 is just five separate tokens at this point; nothing knows about precedence yet." },
+  { k:"parser",  name:"Parser + Semantic", sub:"tokens to syntax tree",
+    what:"The parser (recursive descent, one function per grammar rule) turns the tokens into a syntax tree. Operator precedence is built into the shape of the tree. Semantic analysis then walks the tree with a symbol table: it checks that variables are declared, calls have the right number of arguments and main exists, and it gives every variable a numbered local slot.",
+    look:"Find a * node sitting below a + node: that is why multiplication happens first. Every variable shows [slot n]. The VM never sees names, only slot numbers." },
+  { k:"opt",     name:"Optimiser",         sub:"constant folding",
+    what:"Constant folding evaluates expressions whose value is known at compile time, so the VM has less to do at run time: 2 + 3 * 4 becomes the single number 14. A division or remainder by zero is deliberately not folded, so the error still happens at run time. && and || are folded only when skipping the right side cannot change the result. The same pass also removes dead code: statements after return, break or continue, if (0) branches, and while (0) loops.",
+    look:"Red lines are instructions that disappear, green lines replace them. The cards show how much smaller and faster the program became. Try expr for folding and deadcode for dead-code removal (tick Constant folding first)." },
+  { k:"codegen", name:"Code generator",    sub:"tree to bytecode",
+    what:"The code generator walks the tree in post-order (children first, then the operator), which is exactly the order a stack machine needs. Jumps for if, while, for and the short-circuit operators && and || are emitted with a blank target and back-patched once the real address is known. Calls to functions defined later are patched at the end.",
+    look:"Each line is address, opcode, operand, and the grey text is what it means. Below the listing you can save the program as a .mbc file, run it from the file, and then damage the file to see the VM refuse it." },
+  { k:"vm",      name:"Virtual machine",   sub:"runs the bytecode",
+    what:"The VM is a fetch-decode-execute loop. It fetches the instruction at pc, decodes the opcode, executes it on the operand stack and moves pc on. It has an operand stack, a call stack of frames, and local variable slots in each frame. It checks for stack overflow, division by zero and bad jumps instead of crashing.",
+    look:"Press Next (or the Right arrow key). Click any instruction in the listing to set a breakpoint, then press To breakpoint. The depth chart shows recursion growing and unwinding: click it to jump to that moment. Try the recursion example." },
+  { k:"result",  name:"Result",          sub:"program output",
+    what:"The program's output, produced by the virtual machine, plus how many instructions it executed. Compile-time errors are caught earlier with a line number, and run-time errors such as division by zero are caught by the VM instead of crashing.",
+    look:"Check the output against what you expect from the source. Try editing the program to divide by zero and run it again." },
+  { k:"verify",  name:"Verification",      sub:"is it correct?",
+    what:"The same program runs three ways: on the VM, on the VM with constant folding, and on a separate tree-walking interpreter. If independent implementations agree, a bug in one of them is very unlikely. The test suite runs every example this way against hand-checked answers, and the random-program check looks for disagreements nobody thought to test.",
+    look:"All three outputs should match. Then press Run test suite and Run random check." },
+  { k:"perf",    name:"Performance",       sub:"VM vs interpreter",
+    what:"We time the VM against the tree-walking interpreter on the same program. The VM pays a fixed cost to set up its stacks and then runs simple instructions; the interpreter walks the tree directly. Which one is ahead depends on the program, so we measure instead of guessing.",
+    look:"Use a large program such as bench_fib, because tiny programs mostly measure start-up time. The two are close, and we make no claim of a speed advantage." },
+];
+
+const OPS = {
+  PUSH:["stack","push the constant"], POP:["stack","discard the top value"], LOAD:["stack","push a local variable"], STORE:["stack","pop into a local variable"],
+  ADD:["arith","pop two, add, push"], SUB:["arith","pop two, subtract, push"], MUL:["arith","pop two, multiply, push"], DIV:["arith","pop two, divide, push"], MOD:["arith","pop two, remainder, push"],
+  LT:["cmp","pop two, push 1 if a < b else 0"], EQ:["cmp","pop two, push 1 if a == b else 0"],
+  JMP:["ctl","jump to address"], JZ:["ctl","pop; jump if it was 0 (false)"], CALL:["ctl","call function"], RET:["ctl","return to caller"],
+  PRINT:["io","pop and print"], HALT:["io","stop the machine"],
+};
+const SYM = { ADD:"+", SUB:"-", MUL:"*", DIV:"/", MOD:"%" };
+
+/* ---------- state ---------- */
+let data = null, stage = 0, steps = [], cur = 0, timer = null;
+let bps = new Set(), funcs = {}, slotNames = {}, mbcRes = null, benchRes = null, testRes = null, fuzzRes = null;
+const num = (s, re) => { const m = (s || "").match(re); return m ? +m[1] : null; };
+const post = async (url, body) => (await fetch(url, { method:"POST", body:JSON.stringify(body) })).json();
+const reqBody = () => ({ source:$("src").value, opt:$("opt").checked });
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+const cls = op => "o-" + (OPS[op] ? OPS[op][0] : "io");
+
+/* ---------- loading ---------- */
+async function loadExamples() {
+  const list = await (await fetch("/api/examples")).json();
+  const groups = {};
+  list.forEach(e => (groups[e.group] = groups[e.group] || []).push(e.name));
+  $("ex").innerHTML = Object.keys(groups).map(g => `<optgroup label="${g}">` + groups[g].map(n => `<option>${n}</option>`).join("") + `</optgroup>`).join("");
+  const names = list.map(e => e.name);
+  $("ex").value = names.includes("demo") ? "demo" : names[0];
+  await loadExample();
+}
+async function loadExample() {
+  $("src").value = await (await fetch("/api/example/" + $("ex").value)).text();
+  mbcRes = benchRes = null;
+  go();
+}
+async function go() {
+  stopPlay();
+  $("status").textContent = "running...";
+  mbcRes = benchRes = null; bps = new Set();
+  data = await post("/api/run", reqBody());
+  $("status").textContent = data.error ? "compile error" : (data.runtime_error ? "runtime error" : "ok");
+  if (!data.error) prepare();
+  cur = 0;
+  draw();
+}
+
+/* ---------- analysis of the results ---------- */
+function prepare() {
+  // variable names per function and slot, from the syntax tree
+  slotNames = {};
+  let fn = null;
+  for (const line of data.ast.split("\n")) {
+    const f = line.match(/^Function (\w+)\(([^)]*)\)/);
+    if (f) { fn = f[1]; slotNames[fn] = {}; f[2].split(",").map(s => s.trim()).filter(Boolean).forEach((p,i) => slotNames[fn][i] = p); continue; }
+    const v = line.match(/(?:Decl|Var|Assign) (\w+)\s+\[slot (\d+)\]/);
+    if (v && fn) slotNames[fn][+v[2]] = v[1];
+  }
+  // function table (address of the header) from the disassembly we are running
+  funcs = {};
+  const lines = data.bytecode.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const h = lines[i].match(/^(\w+):\s+\(params=(\d+), locals=(\d+)\)/);
+    if (!h) continue;
+    for (let j = i + 1; j < lines.length; j++) {
+      const m = lines[j].match(/^(\d{4})\s/);
+      if (m) { funcs[+m[1] - 2] = { name:h[1], params:+h[2], locals:+h[3] }; break; }
+    }
+  }
+  steps = simulate(parseTrace(data.trace || ""));
+}
+function parseTrace(t) {
+  const out = [];
+  for (const line of t.split("\n")) {
+    const m = line.match(/^(\d{4})\s+(\w+)\s+(-?\d+)?\s*\[(.*)\]\s*$/);
+    if (m) { out.push({ pc:+m[1], op:m[2], arg:m[3] === undefined ? null : +m[3], stack:m[4].split(",").map(s => s.trim()).filter(Boolean), printed:null }); continue; }
+    const o = line.match(/^\s+output:\s*(-?\d+)/);
+    if (o && out.length) out[out.length - 1].printed = o[1];
+  }
+  return out;
+}
+// replay the trace to know the call frames and local variables after every step
+function simulate(tr) {
+  const frames = [];
+  let prev = [];
+  tr.forEach((s, i) => {
+    const top = prev.length ? prev[prev.length - 1] : null;
+    s.prev = prev; s.top = top;
+    if (s.op === "CALL") {
+      const f = funcs[s.arg] || { name:"?", params:0, locals:0 };
+      const locals = new Array(f.locals).fill("0");
+      const args = f.params ? prev.slice(prev.length - f.params) : [];
+      args.forEach((a, k) => locals[k] = a);
+      frames.push({ fn:f.name, locals });
+      s.callee = f;
+    } else if (s.op === "STORE" && frames.length) {
+      frames[frames.length - 1].locals[s.arg] = top;
+    } else if (s.op === "RET") {
+      s.leaving = frames.length ? frames[frames.length - 1].fn : "?";
+      frames.pop();
+    }
+    s.depth = frames.length;
+    s.frames = frames.slice(-5).map(f => ({ fn:f.fn, locals:f.locals.slice() }));
+    const nxt = tr[i + 1];
+    s.jumped = !!(nxt && s.op === "JZ" && nxt.pc !== s.pc + 2);
+    prev = s.stack;
+  });
+  tr.forEach(s => s.text = explain(s));
+  return tr;
+}
+function vname(s, slot) {
+  const fr = s.frames[s.frames.length - 1];
+  const n = fr && slotNames[fr.fn] && slotNames[fr.fn][slot];
+  return n ? `${n} (slot ${slot})` : `slot ${slot}`;
+}
+function explain(s) {
+  const p = s.prev, n = p.length, b = p[n - 1], a = p[n - 2], res = s.stack[s.stack.length - 1];
+  const fr = s.frames[s.frames.length - 1];
+  switch (s.op) {
+    case "PUSH": return `Push the constant ${s.arg} onto the stack.`;
+    case "POP": return `Discard the top value (${b}). A function's result was not used.`;
+    case "LOAD": return `Copy the variable ${vname(s, s.arg)} onto the stack. Its value is ${res}.`;
+    case "STORE": return `Pop ${b} and store it in the variable ${vname(s, s.arg)}.`;
+    case "ADD": case "SUB": case "MUL": case "DIV": case "MOD":
+      return `Pop ${b} (right operand) and ${a} (left operand), compute ${a} ${SYM[s.op]} ${b}, push the result ${res}.`;
+    case "LT": return `Pop ${b} and ${a}. Is ${a} < ${b}? Push ${res} (${res === "1" ? "true" : "false"}).`;
+    case "EQ": return `Pop ${b} and ${a}. Are they equal? Push ${res} (${res === "1" ? "true" : "false"}).`;
+    case "JMP": return `Jump straight to address ${s.arg}. (This is the end of a loop going back to its test, or skipping an else branch.)`;
+    case "JZ": return `Pop the condition (${b}). ` + (s.jumped ? `It is 0 (false), so jump to address ${s.arg}: skip the body.` : `It is non-zero (true), so carry on with the next instruction.`);
+    case "CALL": {
+      const f = s.callee;
+      return `Call function ${f.name}. Its ${f.params} argument(s) move from the stack into the new frame's local variables, and a new frame is pushed on the call stack.`;
+    }
+    case "RET": return `Return from ${s.leaving}. Its frame is removed from the call stack and the return value stays on top of the operand stack${res !== undefined ? " (" + res + ")" : ""}.`;
+    case "PRINT": return `Pop ${b} and print it.`;
+    case "HALT": return `Stop the machine.`;
+  }
+  return "";
+}
+
+/* ---------- pipeline + caption ---------- */
+function drawPipe() {
+  const bad = data && data.error ? { tokens:1, ast:2, bytecode:4 }[data.error.phase] : -1;
+  $("pipe").innerHTML = STAGES.map((s, i) => {
+    let c = "stage";
+    if (i === stage) c += " on"; else if (i < stage) c += " done";
+    if (i === bad) c += " bad";
+    return (i ? `<div class="arrow">&#9654;</div>` : "") + `<div class="${c}" data-i="${i}"><b>${i + 1}. ${s.name}</b><i>${s.sub}</i></div>`;
+  }).join("");
+  document.querySelectorAll(".stage").forEach(e => e.onclick = () => { stopPlay(); stage = +e.dataset.i; draw(); });
+}
+function drawExplain() {
+  const s = STAGES[stage];
+  $("explain").innerHTML = `
+    <div><h3>${stage + 1}. ${s.name}</h3>
+      <p>${s.what}</p><p class="look"><b>What to look at:</b> ${s.look}</p></div>
+    <div class="nav"><button id="back" ${stage === 0 ? "disabled" : ""}>&#9664; Previous phase</button>
+      <button class="run" id="fwd" ${stage === STAGES.length - 1 ? "disabled" : ""}>Next phase &#9654;</button></div>`;
+  $("back").onclick = () => { stopPlay(); stage--; draw(); };
+  $("fwd").onclick = () => { stopPlay(); stage++; draw(); };
+}
+function draw() { drawPipe(); drawExplain(); drawView(); }
+
+/* ---------- views ---------- */
+function drawView() {
+  const v = $("view");
+  if (!data) { v.innerHTML = ""; return; }
+  const k = STAGES[stage].k;
+  if (k === "source") return viewSource(v);
+  if (data.error) {
+    const where = { tokens:"lexer", ast:"parser / semantic analysis", bytecode:"code generator" }[data.error.phase];
+    const reached = { lexer:1, parser:2, opt:3, codegen:4, vm:5, result:6, verify:7, perf:8 }[k];
+    const failedAt = { tokens:1, ast:2, bytecode:4 }[data.error.phase];
+    if (reached > failedAt) {
+      v.innerHTML = `<h2>Not reached</h2><div class="err">Compilation stopped at the ${where}, so this phase never runs.\n\n${esc(data.error.message)}</div>`;
+      return;
+    }
+    if (k === "lexer" && data.tokens && failedAt > 1) { viewTokens(v); return; }
+    v.innerHTML = `<h2>Compile-time error</h2><div class="err">Detected by the ${where}:\n${esc(data.error.message)}</div>
+      <div class="note">Compile-time errors carry the source line number. The program is rejected before any bytecode is produced.</div>`;
+    return;
+  }
+  if (k === "lexer") viewTokens(v);
+  else if (k === "parser") viewTree(v);
+  else if (k === "opt") viewOpt(v);
+  else if (k === "codegen") viewBytecode(v);
+  else if (k === "vm") viewVM(v);
+  else if (k === "result") viewResult(v);
+  else if (k === "verify") viewVerify(v);
+  else if (k === "perf") viewPerf(v);
+}
+
+function viewSource(v) {
+  v.innerHTML = `<h2>The language and the pipeline</h2>
+    <div style="padding:10px 14px;line-height:1.5">
+      <p style="margin-top:0"><b>MiniC at a glance</b></p>
+      <ul style="margin:0 0 10px;padding-left:20px">
+        <li>One type: 32-bit <code>int</code>. Functions, local variables, recursion.</li>
+        <li><code>if / else</code>, <code>while</code>, <code>for (init; test; step)</code>, <code>break</code>, <code>continue</code>, <code>return</code>, <code>print(expr);</code></li>
+        <li>Operators <code>+ - * / %</code>, comparisons <code>&lt; &gt; &lt;= &gt;= == !=</code>, and <code>&amp;&amp;</code> <code>||</code> <code>!</code> (short-circuit)</li>
+        <li>Execution starts at <code>int main()</code>.</li>
+      </ul>
+      <p><b>What happens when you press Compile &amp; Run</b></p>
+      <ol style="margin:0;padding-left:20px">
+        <li>The <b>lexer</b> turns the text into tokens.</li>
+        <li>The <b>parser</b> builds a syntax tree and <b>semantic analysis</b> checks it.</li>
+        <li>The <b>optimiser</b> folds constant expressions (tick Constant folding).</li>
+        <li>The <b>code generator</b> turns the tree into bytecode for a stack machine.</li>
+        <li>The <b>virtual machine</b> executes that bytecode and prints the result.</li>
+        <li>A second implementation checks the answer, and we measure speed.</li>
+      </ol>
+      <p style="color:var(--mute)">Nothing here is faked: every panel shows the real output of the C program <span class="mono">./mbc</span>.</p>
+    </div>`;
+}
+
+function viewTokens(v) {
+  const byLine = {};
+  data.tokens.split("\n").slice(1).forEach(l => {
+    const m = l.match(/^(\d+)\s+(\w+)\s*(.*)$/);
+    if (!m || m[2] === "EOF") return;
+    (byLine[m[1]] = byLine[m[1]] || []).push({ c:m[2], t:m[3] });
+  });
+  const count = Object.values(byLine).reduce((a, b) => a + b.length, 0);
+  v.innerHTML = `<h2>Tokens produced by the lexer (${count})</h2>
+    <div style="max-height:540px;overflow:auto">` +
+    Object.keys(byLine).map(ln => `<div class="tokline"><span class="ln">${ln}</span>` +
+      byLine[ln].map(t => `<span class="chip t-${t.c}" title="${t.c}">${esc(t.t)}</span>`).join("") + `</div>`).join("") +
+    `</div><div class="legend"><b>Token classes:</b>
+      <span class="chip t-KEYWORD">KEYWORD</span><span class="chip t-IDENT">IDENT</span><span class="chip t-NUMBER">NUMBER</span>
+      <span class="chip t-OPERATOR">OPERATOR</span><span class="chip t-DELIM">DELIM</span></div>`;
+}
+
+function viewTree(v) {
+  const rows = data.ast.split("\n").filter(Boolean).map(l => {
+    const ind = l.match(/^ */)[0].length / 2;
+    const txt = l.trim();
+    const slot = txt.match(/\s+(\[.*\])$/);
+    const label = slot ? txt.slice(0, txt.length - slot[0].length) : txt;
+    return { ind, label, extra: slot ? slot[1] : "", kind: label.split(/[ (]/)[0] };
+  });
+  let html = "", prev = -1;
+  rows.forEach((r, i) => {
+    if (i > 0) {
+      if (r.ind > prev) html += "<ul>";
+      else { html += "</li>"; for (let d = prev; d > r.ind; d--) html += "</ul></li>"; }
+    }
+    html += `<li><span class="pill n-${r.kind}">${esc(r.label)}${r.extra ? `<small>${esc(r.extra)}</small>` : ""}</span>`;
+    prev = r.ind;
+  });
+  html += "</li>"; for (let d = prev; d > 0; d--) html += "</ul></li>";
+  v.innerHTML = `<h2>Syntax tree after semantic analysis</h2><ul class="tree">${html}</ul>
+    <div class="note">Children are the operands: a node is evaluated after everything below it. <b>[slot n]</b> was added by semantic analysis.</div>`;
+}
+
+function bcLines(text, withWhy) {
+  let fn = null;
+  return text.split("\n").map(l => {
+    if (!l.trim()) return "";
+    const h = l.match(/^(\w+):/);
+    if (h) { fn = h[1]; return `<div class="fn">${esc(l)}</div>`; }
+    const m = l.match(/^(\d{4})\s+(\w+)\s*(-?\d+)?\s*(;.*)?$/);
+    if (!m) return `<div>${esc(l)}</div>`;
+    const [, addr, op, arg, cm] = m;
+    let why = OPS[op] ? OPS[op][1] : "";
+    if (arg !== undefined) {
+      if (op === "PUSH") why = `push ${arg}`;
+      else if (op === "LOAD" || op === "STORE") { const n = fn && slotNames[fn] && slotNames[fn][arg]; why = (op === "LOAD" ? "push variable " : "pop into variable ") + (n || "slot " + arg); }
+      else if (op === "JMP" || op === "JZ") why = OPS[op][1].replace("address", "address " + arg);
+      else if (op === "CALL") why = "call " + (cm ? cm.replace(/^;\s*/, "") : "address " + arg);
+    }
+    return `<div data-pc="${+addr}"><span class="addr">${addr}</span><span class="op ${cls(op)}">${op}</span><span class="arg">${arg === undefined ? "" : arg}</span><span class="why">${withWhy ? esc(why) : ""}</span></div>`;
+  }).join("");
+}
+
+function viewBytecode(v) {
+  const w0 = num(data.stats, /bytecode size: (\d+)/);
+  const w = w0 == null ? "?" : w0;
+  v.innerHTML = `<h2>Generated bytecode${data.opt ? " (with constant folding)" : ""}</h2>
+    <pre class="bc">${bcLines(data.bytecode, true)}</pre>
+    <div class="legend"><b>Colour:</b> <span class="o-stack"><b>stack/variables</b></span> <span class="o-arith"><b>arithmetic</b></span> <span class="o-cmp"><b>comparison</b></span> <span class="o-ctl"><b>control flow</b></span> <span class="o-io"><b>print/halt</b></span></div>
+    <div class="note">${w} words in total. The program starts with a tiny stub <span class="mono">CALL main ; HALT</span>. Each function begins with a header [params][locals] that CALL reads.</div>
+    <details><summary>The whole instruction set (17 opcodes)</summary><table>
+      ${Object.entries(OPS).map(([o, d]) => `<tr><td class="mono ${"o-" + d[0]}"><b>${o}</b></td><td>${d[1]}</td></tr>`).join("")}</table></details>
+    <h2 style="border-top:1px solid var(--line)">Bytecode file (.mbc)</h2>
+    <div class="btns" id="mbcact" style="border-top:0">
+      <button class="run" data-m="none">Save and run the file</button><button data-m="opcode">Corrupt an instruction</button>
+      <button data-m="truncate">Cut the file in half</button><button data-m="magic">Break the magic number</button></div><div id="mbcout"></div>`;
+  document.querySelectorAll("#mbcact button").forEach(b => b.onclick = async () => {
+    $("mbcout").innerHTML = `<div class="note">Compiling and running the file...</div>`;
+    mbcRes = await post("/api/mbc", { ...reqBody(), mode:b.dataset.m }); showMbc(); });
+  if (mbcRes) showMbc();
+}
+function hexdump(res) {
+  const bytes = res.bytes, owner = new Array(bytes.length).fill("");
+  const map = { "magic":"f-magic", "code length":"f-len", "code":"f-code", "function count":"f-nf", "function table":"f-fn" };
+  (res.fields || []).forEach(f => { for (let i = f.start; i < Math.min(f.end, bytes.length); i++) owner[i] = map[f.name] || ""; });
+  let html = "";
+  for (let o = 0; o < bytes.length; o += 16) {
+    let hx = "", asc = "";
+    for (let i = o; i < Math.min(o + 16, bytes.length); i++) {
+      hx += `<span class="hx ${owner[i]}">${bytes[i].toString(16).padStart(2, "0")}</span> `;
+      asc += bytes[i] >= 32 && bytes[i] < 127 ? esc(String.fromCharCode(bytes[i])) : ".";
+    }
+    html += `<div class="hexrow"><span class="off">${o.toString(16).padStart(4, "0")}</span><span>${hx}</span><span class="asc">${asc}</span></div>`;
+  }
+  return html;
+}
+function showMbc() {
+  const r = mbcRes, o = $("mbcout");
+  if (!o) return;
+  if (r.error) { o.innerHTML = `<div class="err">${esc(r.error)}</div>`; return; }
+  const ok = r.exec_rc === 0;
+  o.innerHTML = `<div class="note" style="border-top:0"><b>${r.size} bytes</b> in prog.mbc ${r.note ? `<span class="bad-t"> ${esc(r.note)}</span>` : ""}</div>
+    <div style="max-height:200px;overflow:auto;padding:4px 0;border-top:1px solid var(--line)">${hexdump(r)}</div>
+    <div class="legend"><span class="hx f-magic">&nbsp;magic MBC1&nbsp;</span><span class="hx f-len">&nbsp;code length&nbsp;</span><span class="hx f-code">&nbsp;code words&nbsp;</span><span class="hx f-nf">&nbsp;function count&nbsp;</span><span class="hx f-fn">&nbsp;function table&nbsp;</span></div>
+    ${ok ? `<div class="okbox"><b>Run from the file:</b> the VM loaded it and printed</div><pre>${esc(r.exec_out) || "(no output)"}</pre>`
+         : `<div class="err">The VM refused the file:\n${esc(r.exec_err)}</div><div class="note">A damaged file is detected and reported, never executed blindly.</div>`}`;
+}
+
+/* ---- optimiser view ---- */
+function instrKey(l) {
+  const m = l.match(/^\d{4}\s+(\w+)\s*(-?\d+)?\s*(;\s*(\w+))?/);
+  if (!m) return l.trim();
+  return m[1] + (["PUSH", "LOAD", "STORE"].includes(m[1]) ? " " + m[2] : "") + (m[1] === "CALL" ? " " + m[4] : "");
+}
+function diffRows(a, b) {
+  const A = a.split("\n").filter(l => l.trim()), B = b.split("\n").filter(l => l.trim());
+  const ka = A.map(instrKey), kb = B.map(instrKey), n = A.length, m = B.length;
+  const L = Array.from({ length:n + 1 }, () => new Int32Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) L[i][j] = ka[i] === kb[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+  const rows = []; let i = 0, j = 0;
+  while (i < n && j < m) {
+    if (ka[i] === kb[j]) { rows.push([A[i], B[j], "same"]); i++; j++; }
+    else if (L[i + 1][j] >= L[i][j + 1]) { rows.push([A[i], null, "del"]); i++; }
+    else { rows.push([null, B[j], "add"]); j++; }
+  }
+  while (i < n) rows.push([A[i++], null, "del"]);
+  while (j < m) rows.push([null, B[j++], "add"]);
+  return rows;
+}
+function viewOpt(v) {
+  const folds = num(data.stats_opt, /constant folds: (\d+)/) || 0, dead = num(data.stats_opt, /dead statements removed: (\d+)/) || 0;
+  const iP = num(data.stats_plain, /instructions executed: (\d+)/), iO = num(data.stats_opt, /instructions executed: (\d+)/);
+  const wP = num(data.stats_plain, /bytecode size: (\d+)/), wO = num(data.stats_opt, /bytecode size: (\d+)/);
+  const rows = diffRows(data.bytecode_plain, data.bytecode_opt);
+  const side = (idx, kind) => rows.map(r => {
+    const t = r[idx];
+    if (t === null) return `<div class="blank"><span>&nbsp;</span></div>`;
+    const m = t.match(/^(\d{4})\s+(\w+)\s*(-?\d+)?/);
+    if (!m) return `<div class="fn">${esc(t)}</div>`;
+    return `<div class="${r[2] === kind ? kind : ""}"><span class="addr" style="color:#9ca3af;width:38px">${m[1]}</span><span class="op ${cls(m[2])}" style="width:56px;font-weight:700">${m[2]}</span><span class="arg">${m[3] === undefined ? "" : m[3]}</span></div>`;
+  }).join("");
+  v.innerHTML = `<h2>Constant folding: before and after</h2>
+    <div class="cards"><div class="card"><b>${folds}</b><span>expressions folded</span></div>
+      <div class="card"><b>${dead}</b><span>dead statements removed</span></div>
+      <div class="card"><b>${wP} to ${wO}</b><span>bytecode size in words</span></div>
+      <div class="card"><b>${iP == null ? "-" : iP} to ${iO == null ? "-" : iO}</b><span>instructions the VM executes</span></div></div>
+    ${folds || dead ? "" : `<div class="note">This program has nothing the optimiser can fold or remove. Pick <b>expr</b> or <b>deadcode</b> to see it work.</div>`}
+    <div class="twocol" style="border-top:1px solid var(--line)"><div><h3>Without optimisation</h3><pre class="bc diff" style="padding:6px 0">${side(0, "del")}</pre></div>
+      <div><h3>With constant folding</h3><pre class="bc diff" style="padding:6px 0">${side(1, "add")}</pre></div></div>
+    <div class="note">Both versions print the same output. The Verification stage checks that for every program.</div>`;
+}
+
+function viewVM(v) {
+  if (data.trace_skipped) {
+    v.innerHTML = `<h2>Too long to step through</h2><div class="note" style="border-top:0">This program executes <b>${data.trace_skipped.toLocaleString()}</b> instructions, too many to show one by one. It ran correctly and printed:</div><pre>${esc(data.output) || "(no output)"}</pre><div class="note">Pick a smaller program such as expr, factorial or recursion to step through, or open the Performance phase for this one.</div>`;
+    return;
+  }
+  if (!steps.length) { v.innerHTML = `<h2>Virtual machine</h2><div class="note">No instructions were executed.</div>`; return; }
+  v.innerHTML = `<h2>Virtual machine, one instruction at a time</h2>
+    <div class="ctrl"><button id="first">|&lt; Start</button><button id="prev">&#9664; Back</button><button id="next" class="run">Next &#9654;</button>
+      <button id="play">Play</button><button id="tobp" title="Click an instruction in the listing to set a breakpoint">To breakpoint</button><button id="clrbp">Clear breakpoints</button><button id="last">End &gt;|</button>
+      <input type="range" id="sl" min="0" max="${steps.length - 1}" value="${cur}"><span class="mono" id="cnt"></span></div>
+    <div class="now"><div class="ins" id="ins"></div><div class="says" id="says"></div><div class="outline">Output so far: <span class="mono" id="out"></span></div></div>
+    <div class="vmgrid">
+      <div><h4>Operand stack (top at the highlight)</h4><div class="stackbox" id="stk"></div></div>
+      <div><h4>Call stack and local variables</h4><div id="frames"></div></div>
+    </div>
+    <div class="chart"><div class="lg"><b style="background:#15803d"></b>call depth<b style="background:#1d4ed8"></b>operand stack size<span style="margin-left:14px">click the chart to jump to a moment</span></div><svg id="chart" viewBox="0 0 600 78" preserveAspectRatio="none"></svg></div>
+    <div class="pcline" id="pcl"></div>
+    <div class="bcwrap"><pre class="bc" id="dis">${bcLines(data.bytecode, true)}</pre></div>
+`;
+  const clamp = n => Math.max(0, Math.min(steps.length - 1, n));
+  $("first").onclick = () => { stopPlay(); cur = 0; paint(); };
+  $("prev").onclick = () => { stopPlay(); cur = clamp(cur - 1); paint(); };
+  $("next").onclick = () => { stopPlay(); cur = clamp(cur + 1); paint(); };
+  $("last").onclick = () => { stopPlay(); cur = steps.length - 1; paint(); };
+  $("sl").oninput = e => { stopPlay(); cur = +e.target.value; paint(); };
+  $("play").onclick = () => {
+    if (timer) return stopPlay();
+    $("play").textContent = "Pause";
+    timer = setInterval(() => { if (cur >= steps.length - 1) return stopPlay(); cur++; paint(); if (bps.has(steps[cur].pc)) stopPlay(); }, 500);
+  };
+  $("tobp").onclick = () => {
+    stopPlay();
+    for (let i = cur + 1; i < steps.length; i++) if (bps.has(steps[i].pc)) { cur = i; paint(); return; }
+    cur = steps.length - 1; paint();
+  };
+  $("clrbp").onclick = () => { bps.clear(); markBps(); };
+  $("dis").onclick = e => {
+    const row = e.target.closest("[data-pc]");
+    if (!row) return;
+    const pc = +row.dataset.pc;
+    if (bps.has(pc)) bps.delete(pc); else bps.add(pc);
+    markBps();
+  };
+  drawChart();
+  $("chart").onclick = e => {
+    const r = e.currentTarget.getBoundingClientRect();
+    stopPlay(); cur = clamp(Math.floor((e.clientX - r.left) / r.width * steps.length)); paint();
+  };
+  markBps();
+  paint();
+}
+function markBps() {
+  const d = $("dis");
+  if (!d) return;
+  d.querySelectorAll("[data-pc]").forEach(r => r.classList.toggle("bp", bps.has(+r.dataset.pc)));
+  $("tobp").disabled = bps.size === 0;
+  $("clrbp").disabled = bps.size === 0;
+  $("tobp").textContent = bps.size ? `To breakpoint (${bps.size})` : "To breakpoint";
+}
+function drawChart() {
+  const W = 600, H = 78, n = steps.length, cols = Math.min(W, n);
+  const dep = [], stk = [];
+  for (let c = 0; c < cols; c++) {
+    let a = Math.floor(c * n / cols), b = Math.max(a + 1, Math.floor((c + 1) * n / cols)), md = 0, ms = 0;
+    for (let i = a; i < b; i++) { md = Math.max(md, steps[i].depth); ms = Math.max(ms, steps[i].stack.length); }
+    dep.push(md); stk.push(ms);
+  }
+  const top = Math.max(1, ...dep, ...stk);
+  const pts = arr => arr.map((v, c) => ((c + .5) * W / cols).toFixed(1) + "," + (H - 4 - v / top * (H - 10)).toFixed(1)).join(" ");
+  $("chart").innerHTML = `<text x="4" y="11" font-size="10" fill="#6b7280">max ${top}</text>
+    <polyline points="${pts(stk)}" fill="none" stroke="#1d4ed8" stroke-width="1.5" vector-effect="non-scaling-stroke"/>
+    <polyline points="${pts(dep)}" fill="none" stroke="#15803d" stroke-width="2.5" vector-effect="non-scaling-stroke"/>
+    <line id="cmark" x1="0" x2="0" y1="0" y2="${H}" stroke="#dc2626" stroke-width="2" vector-effect="non-scaling-stroke"/>`;
+}
+function stopPlay() { if (timer) { clearInterval(timer); timer = null; const p = $("play"); if (p) p.textContent = "Play"; } }
+
+function paint() {
+  const s = steps[cur];
+  $("sl").value = cur;
+  const cm = $("cmark"); if (cm) { const x = (cur + .5) / steps.length * 600; cm.setAttribute("x1", x); cm.setAttribute("x2", x); }
+  $("cnt").textContent = `step ${cur + 1} / ${steps.length}`;
+  $("ins").innerHTML = `<span class="addr" style="color:#9ca3af">${String(s.pc).padStart(4, "0")}</span> <span class="${cls(s.op)}">${s.op}</span>${s.arg !== null ? " " + s.arg : ""}`;
+  $("says").textContent = s.text;
+  $("stk").innerHTML = s.stack.length
+    ? s.stack.map((x, i) => `<div class="cell${i === s.stack.length - 1 ? " top" : ""}">${esc(x)}</div>`).join("")
+    : `<span class="empty">empty</span>`;
+  const fr = s.frames;
+  $("frames").innerHTML = (s.depth > fr.length ? `<div class="empty">... ${s.depth - fr.length} older frame(s)</div>` : "") +
+    (fr.length ? fr.slice().reverse().map((f, i) => `<div class="frame${i === 0 ? " top" : ""}"><b>${esc(f.fn)}</b>${i === 0 ? " (running)" : ""}
+      <div class="vars">${f.locals.map((val, k) => `<span class="var">${esc((slotNames[f.fn] && slotNames[f.fn][k]) || "slot" + k)} = ${esc(val)}</span>`).join("") || '<span class="empty">no locals</span>'}</div></div>`).join("")
+      : `<span class="empty">no active function</span>`) +
+    `<div class="empty">call depth: ${s.depth}</div>`;
+  $("pcl").innerHTML = `Program counter <b>pc = ${s.pc}</b> &nbsp; Last step ${cur > 0 ? "came from pc " + steps[cur - 1].pc : "is the first instruction"}`;
+  const d = $("dis");
+  d.querySelectorAll(".cur").forEach(e => e.classList.remove("cur"));
+  const row = d.querySelector(`[data-pc="${s.pc}"]`);
+  if (row) { row.classList.add("cur"); const top = row.offsetTop - d.clientHeight / 2; d.scrollTop = Math.max(0, top); }
+  const printed = steps.slice(0, cur + 1).filter(x => x.printed !== null).map(x => x.printed);
+  $("out").textContent = printed.length ? printed.join("   ") : "(nothing yet)";
+}
+
+function viewResult(v) {
+  const ins = num(data.stats, /instructions executed: (\d+)/), w = num(data.stats, /bytecode size: (\d+)/);
+  v.innerHTML = `<h2>Program output</h2>
+    <pre>${esc(data.output) || "(no output)"}</pre>
+    ${data.runtime_error ? `<div class="err">${esc(data.runtime_error)}</div>` : ""}
+    ${ins === null ? "" : `<div class="cards"><div class="card"><b>${ins}</b><span>instructions executed</span></div><div class="card"><b>${w}</b><span>bytecode size in words</span></div></div>`}
+    <div class="note">Runtime errors such as division by zero, stack overflow or runaway recursion are caught by the VM and reported with the pc. Try <span class="mono">print(1 / 0);</span> in the editor.</div>`;
+}
+
+/* ---------- verification and performance ---------- */
+function viewVerify(v) {
+  const col = (title, out, ok, err) => `<div><h3>${title}${ok === null ? "" : `<span class="tick ${ok ? "y" : "n"}" style="margin-left:8px">${ok ? "&#10003;" : "x"}</span>`}</h3><pre style="max-height:200px">${esc(out) || "(no output)"}</pre>${err ? `<div class="err">${esc(err)}</div>` : ""}</div>`;
+  const errOf = (rc, text) => rc ? text.replace(/\[stats\].*/, "").trim() : "";
+  const agree = data.match_interp && data.match_opt;
+  v.innerHTML = `<h2>The same program, three ways</h2>
+    <div class="twocol" style="grid-template-columns:1fr 1fr 1fr">${col("VM", data.output_plain, null, errOf(data.rc_plain, data.stats_plain))}
+      ${col("VM with -O", data.output_opt, data.match_opt, errOf(data.rc_opt, data.stats_opt))}
+      ${col("Tree-walking interpreter", data.interp, data.match_interp, data.interp_error)}</div>
+    ${agree ? `<div class="okbox"><b>All three agree</b> on the output and on whether the program failed.</div>` : `<div class="err">The three results differ. That would be a bug in the compiler.</div>`}
+    <h2 style="border-top:1px solid var(--line)">Test suite</h2>
+    <div class="btns" style="border-top:0"><button class="run" id="rt">Run test suite</button><span id="tsum" style="align-self:center">${testRes ? "" : "Runs every example four ways and every error case."}</span></div><div id="tout"></div>
+    <h2 style="border-top:1px solid var(--line)">Random-program check</h2>
+    <div class="btns" style="border-top:0"><button class="run" id="rf">Run random check</button><span id="fsum" style="align-self:center">${fuzzRes ? "" : "Random programs with every operator, compared across the three implementations, plus random damaged bytecode files."}</span></div><div id="fout"></div>`;
+  $("rt").onclick = async () => { $("tsum").textContent = "running..."; testRes = await post("/api/tests", {}); showTests(); };
+  $("rf").onclick = async () => { $("fsum").textContent = "running..."; fuzzRes = await post("/api/fuzz", {}); showFuzz(); };
+  if (testRes) showTests(); if (fuzzRes) showFuzz();
+}
+function showTests() {
+  if (!$("tout")) return;
+  const r = testRes, total = r.passed + r.failed;
+  $("tsum").innerHTML = `<b class="${r.failed ? "bad-t" : "good"}">${r.passed} of ${total} checks passed</b>`;
+  let sec = "", html = `<div class="meter"><i style="width:${total ? r.passed / total * 100 : 0}%"></i><span>${r.passed} / ${total}</span></div><div style="max-height:260px;overflow:auto">`;
+  r.items.forEach(i => { if (i.section !== sec) { sec = i.section; html += `<div class="tsec">${esc(sec)}</div>`; } html += `<div class="trow"><span class="tick ${i.ok ? "y" : "n"}">${i.ok ? "&#10003;" : "x"}</span>${esc(i.name)}</div>`; });
+  $("tout").innerHTML = html + "</div>";
+}
+function showFuzz() {
+  if (!$("fout")) return;
+  const r = fuzzRes;
+  if (r.error) { $("fsum").textContent = ""; $("fout").innerHTML = `<div class="err">${esc(r.error)}</div>`; return; }
+  const good = r.mismatches === 0 && r.crashes === 0;
+  $("fsum").innerHTML = `<b class="${good ? "good" : "bad-t"}">${good ? "No disagreements, no crashes" : "Problems found"}</b>`;
+  $("fout").innerHTML = `<div class="cards"><div class="card"><b>${r.programs}</b><span>random programs, ${r.mismatches} disagreements</span></div>
+    <div class="card"><b>${r.files}</b><span>random bytecode files, ${r.crashes} VM crashes</span></div></div>`;
+}
+function viewPerf(v) {
+  v.innerHTML = `<h2>VM against tree-walking interpreter</h2>
+    <div class="btns" style="border-top:0"><button class="run" id="rb">Run benchmark on the current program</button>
+      <span style="align-self:center">or load: <button data-b="bench_fib">bench_fib</button> <button data-b="bench_loop">bench_loop</button> <button data-b="bench_perfect">bench_perfect</button></span></div><div id="bout"></div>
+    <div class="note">The VM sets up its stacks on every run, so very small programs mostly measure start-up. The bench examples run long enough to measure the execution loop itself.</div>`;
+  $("rb").onclick = runBench;
+  document.querySelectorAll("[data-b]").forEach(b => b.onclick = async () => { $("ex").value = b.dataset.b; await loadExample(); stage = 8; draw(); runBench(); });
+  if (benchRes) showBench();
+}
+async function runBench() {
+  $("bout").innerHTML = `<div class="note">Measuring (this can take a few seconds)...</div>`;
+  benchRes = await post("/api/bench", reqBody());
+  showBench();
+}
+function showBench() {
+  const r = benchRes, o = $("bout");
+  if (!o) return;
+  if (r.error) { o.innerHTML = `<div class="err">${esc(r.error)}</div>`; return; }
+  const max = Math.max(r.vm_s, r.interp_s) || 1, ratio = r.interp_s > 0 ? r.vm_s / r.interp_s : 0;
+  const ms = x => (x * 1000).toFixed(x < 0.001 ? 3 : 2) + " ms";
+  const verdict = ratio === 0 ? "The interpreter was too fast to measure." : ratio <= 1 ? `The VM was ${(1 / ratio).toFixed(2)} times faster.` : `The VM was ${ratio.toFixed(2)} times slower.`;
+  o.innerHTML = `<div style="border-top:1px solid var(--line);padding:6px 0">
+      <div class="barrow"><span>Bytecode VM</span><i style="width:${Math.max(2, r.vm_s / max * 55)}%;background:#15803d"></i><span class="mono">${ms(r.vm_s)}</span></div>
+      <div class="barrow"><span>Tree-walking interpreter</span><i style="width:${Math.max(2, r.interp_s / max * 55)}%;background:#c2410c"></i><span class="mono">${ms(r.interp_s)}</span></div></div>
+    <div class="cards"><div class="card"><b>${r.instructions.toLocaleString()}</b><span>VM instructions per run</span></div>
+      <div class="card"><b>${r.vm_s > 0 ? (r.instructions / r.vm_s / 1e6).toFixed(0) : "-"}</b><span>million instructions per second</span></div>
+      <div class="card"><b>${r.reps}</b><span>runs averaged</span></div></div>
+    <div class="note">${esc(verdict)} The VM checks every instruction and dispatches with a plain switch, which keeps it simple and safe. Speed was not the goal. Typical speed-ups are computed-goto dispatch and combining frequent instruction pairs.</div>`;
+}
+
+/* ---------- events ---------- */
+$("run").onclick = go;
+$("opt").onchange = go;
+$("ex").onchange = loadExample;
+$("src").addEventListener("keydown", e => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter") go(); });
+document.addEventListener("keydown", e => {
+  if (e.target.tagName === "TEXTAREA" || e.target.tagName === "SELECT") return;
+  if (STAGES[stage].k !== "vm" || !steps.length || !$("sl")) return;
+  if (e.key === "ArrowRight") { stopPlay(); cur = Math.min(steps.length - 1, cur + 1); paint(); e.preventDefault(); }
+  if (e.key === "ArrowLeft") { stopPlay(); cur = Math.max(0, cur - 1); paint(); e.preventDefault(); }
+});
+loadExamples();
+</script>
+</body>
+</html>
